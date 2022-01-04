@@ -18,7 +18,6 @@
             <div class="flex">
               <div class="flex-col justify-center w-full">
                 {{ unit.title }}
-                {{ unit.order }}
               </div>
               <div class="flex-col">
                 <div class="div flex items-center">
@@ -54,7 +53,6 @@
             <div class="flex">
               <div class="flex-col justify-center w-full">
                 {{ level.title }}
-                {{ level.order }}
               </div>
               <div class="flex-col">
                 <div class="div flex items-center">
@@ -72,7 +70,11 @@
       </div>
       <div class="flex-col w-full p-2">
         <div class="font-bold">Questions</div>
-        <button v-if="levelActive" class="mt-5 mb-5 btn-add">
+        <button
+          v-on:click="openDialogAddQuestions()"
+          v-if="levelActive"
+          class="mt-5 mb-5 btn-add"
+        >
           + Add question
         </button>
         <draggable
@@ -81,15 +83,30 @@
           @dragend="updateQuestions"
         >
           <div
-            class="list-group-item bg-black-500 p-2"
+            class="list-group-item flex flex-row bg-black-500 p-2"
             v-for="q in questions"
             :key="q.id"
           >
             {{ q.question }}
+            <button
+              @click="openDialogUpdateQuestions(q)"
+              class="fas ml-2 w-7 h-7 fa-pencil-alt"
+            ></button>
           </div>
         </draggable>
       </div>
     </div>
+
+    <my-dialog v-model:show="showDialogQuestions" :title="titleModal">
+      <add-questionlevel
+        :quest="questForm"
+        :type="type"
+        :questionsType="questionsType"
+        @create="createQuest"
+        @update="updateQuest"
+        @delete="deleteQuest"
+      ></add-questionlevel>
+    </my-dialog>
   </div>
   <my-dialog v-model:show="showDialogUnit" :title="titleModal">
     <unit-form
@@ -117,7 +134,9 @@ import getCollection from "@/composables/getCollection";
 import { ref } from "vue";
 import { VueDraggableNext } from "vue-draggable-next";
 import firebase from "firebase/compat";
+import AddQuestionlevel from "./modals/questionLvl.vue";
 import UnitForm from "@/components/UnitForm";
+import { DateTime } from "luxon";
 import LevelForm from "@/components/LevelForm";
 import MyDialog from "@/components/MyDialog";
 import { v4 as uuidv4 } from "uuid";
@@ -129,6 +148,14 @@ export default {
     MyDialog,
     LevelForm,
     draggable: VueDraggableNext,
+    AddQuestionlevel,
+  },
+  data() {
+    return {
+      addQuestionType: true,
+      addQuestionLevel: true,
+      questionsType: null,
+    };
   },
   setup() {
     const { documents: units } = getCollection("Units");
@@ -147,7 +174,16 @@ export default {
       isLive: true,
       unitId: "",
     });
+    const questForm = ref({
+      docId: "",
+      id: "",
+      createdAt: "",
+      levelId: "",
+      unitId: "",
+      levelQuestions: [],
+    });
     const showDialogUnit = ref(false);
+    const showDialogQuestions = ref(false);
     const showDialogLevel = ref(false);
     const titleModal = ref("modal");
     const type = ref("none");
@@ -162,7 +198,7 @@ export default {
 
     const levelHandleClick = (level) => {
       levelActive.value = level.id;
-
+      console.log(level);
       let data = contents.value.find((x) => x.levelId === level.id);
 
       levelContentActive.value = level.levelContentId;
@@ -189,13 +225,20 @@ export default {
     const hideDialog = () => {
       showDialogUnit.value = false;
       showDialogLevel.value = false;
+      showDialogQuestions.value = false;
       titleModal.value = "modal";
       type.value = "none";
-
+      questForm.value = {
+        docId: "",
+        id: "",
+        createdAt: "",
+        levelId: "",
+        unitId: "",
+        levelQuestions: [],
+      };
       unitForm.value = { title: "", isLive: true };
       levelForm.value = { title: "", subTitle: "", iconLink: "", isLive: true };
     };
-
     const openDialogAddUnit = async () => {
       showDialogUnit.value = true;
       titleModal.value = "Unit";
@@ -210,17 +253,22 @@ export default {
 
       unitForm.value = u;
     };
+
     const openDialogAddLevel = () => {
       showDialogLevel.value = true;
       titleModal.value = "Level";
       type.value = "Add";
 
       levelForm.value = {
-        title: "",
-        subTitle: "",
-        iconLink: "",
-        isLive: true,
+        craetedAt: "",
+        levelId: "",
         unitId: unitActive,
+        levelQuestions: [
+          {
+            title: "",
+            desc: "",
+          },
+        ],
       };
     };
     const openDialogUpdateLevel = (l) => {
@@ -230,6 +278,29 @@ export default {
 
       levelForm.value = l;
       levelForm.value.unitId = unitActive;
+    };
+    const openDialogUpdateQuestions = (l) => {
+      showDialogQuestions.value = true;
+      titleModal.value = "Questions";
+      type.value = "Update";
+
+      questForm.value = l;
+      questForm.value.id = l.id;
+      questForm.value.docId = levelContentActive;
+      questForm.value.levelId = levelActive;
+      questForm.value.unitId = unitActive;
+    };
+    const openDialogAddQuestions = () => {
+      showDialogQuestions.value = true;
+      titleModal.value = "Questions";
+      type.value = "Add";
+
+      questForm.value = {
+        createdAt: "",
+        levelId: levelActive,
+        unitId: unitActive,
+        levelQuestions: [],
+      };
     };
 
     const createUnit = (newUnit) => {
@@ -242,6 +313,31 @@ export default {
 
       db.collection("Units")
         .add(newUnit)
+        .catch((e) => console.log(e));
+
+      hideDialog();
+    };
+    const createQuest = async (newQuest) => {
+      db.collection("LevelContent")
+        .doc(levelContentActive.value)
+        .update({ levelId: levelActive.value })
+        .catch((e) => console.log(e));
+      let ques = contents.value.find((x) => x.id == levelContentActive.value);
+      let max =
+        ques.levelQuestions && ques.levelQuestions.length
+          ? ques.levelQuestions.slice().sort((a, b) => b.order - a.order)[0]
+              .order + 1
+          : 0;
+
+      newQuest.order = max;
+      questions.value = ques.levelQuestions
+        ? [...ques.levelQuestions, newQuest]
+        : [newQuest];
+
+      let levelQuestions = questions.value;
+      db.collection("LevelContent")
+        .doc(levelContentActive.value)
+        .update({ levelQuestions })
         .catch((e) => console.log(e));
 
       hideDialog();
@@ -264,27 +360,44 @@ export default {
 
       hideDialog();
     };
+    const createLevel = (newLevel, file, unitId) => {
+      db.collection("LevelContent")
+        .add({
+          unitId: unitActive.value,
+          createdAt: DateTime.now().toMillis(),
+          levelQuestions: [],
+        })
+        .then(async (i) => {
+          newLevel.id = uuidv4();
+          newLevel.levelContentId = i.id;
+          let unit = units.value.find((x) => x.id == unitId);
+          let max =
+            unit.levels && unit.levels.length
+              ? unit.levels.slice().sort((a, b) => b.order - a.order)[0].order +
+                1
+              : 0;
 
-    const createLevel = async (newLevel, file, unitId) => {
-      newLevel.id = uuidv4();
+          newLevel.order = max;
+          await uploadImage(file, "Level Icons");
 
-      let unit = units.value.find((x) => x.id == unitId);
-      let max =
-        unit.levels && unit.levels.length
-          ? unit.levels.slice().sort((a, b) => b.order - a.order)[0].order + 1
-          : 0;
+          newLevel.iconLink = url.value;
 
-      newLevel.order = max;
-      await uploadImage(file, "Level Icons");
+          levelsList.value = unit.levels
+            ? [...unit.levels, newLevel]
+            : [newLevel];
 
-      newLevel.iconLink = url.value;
+          let levels = levelsList.value;
 
-      levelsList.value = unit.levels ? [...unit.levels, newLevel] : [newLevel];
-
-      let levels = levelsList.value;
-
-      db.collection("Units").doc(unitId).update({ levels });
-
+          db.collection("Units").doc(unitId).update({ levels });
+        }); /* .then(() => { 
+         db.collection("LevelContent")
+        .add({
+        levelId: levelActive.value,
+        unitId: unitActive.value,
+        createdAt: DateTime.now().toMillis(),
+        levelQuestions: [],
+        })
+      }); */
       hideDialog();
     };
     const updateLevel = async (updLevel, file, unitId, levelId) => {
@@ -308,6 +421,37 @@ export default {
 
       hideDialog();
     };
+    const updateQuest = async (updQuest, file, questId) => {
+      if (file && updQuest.image) {
+        await uploadImage(file, "Level Icons");
+        updQuest.image = url.value;
+      }
+
+     let ques = contents.value.find((x) => x.id == levelContentActive.value);
+      questions.value = ques.levelQuestions;
+      const index = questions.value.findIndex((x) => x.id == questId);
+
+      questions.value[index].question = updQuest.question;
+      questions.value[index].image = updQuest.image;
+      questions.value[index].answers = updQuest.answers;
+
+      let levelQuestions = questions.value;
+
+      db.collection("LevelContent").doc(levelContentActive.value).update({ levelQuestions });
+      hideDialog();
+    };
+
+     const deleteQuest = (questId) => {
+      let ques = contents.value.find((x) => x.id == levelContentActive.value);
+      questions.value = ques.levelQuestions.filter((x) => x.id !== questId);
+
+      let levelQuestions = questions.value;
+
+      db.collection("LevelContent").doc(levelContentActive.value).update({ levelQuestions });
+
+      hideDialog();
+    };
+
     const deleteLevel = (levelId, unitId) => {
       const unit = units.value.find((x) => x.id == unitId);
       levelsList.value = unit.levels.filter((x) => x.id !== levelId);
@@ -328,15 +472,22 @@ export default {
       questions,
       unitForm,
       levelForm,
+      showDialogQuestions,
       showDialogUnit,
       showDialogLevel,
       titleModal,
+      questForm,
       type,
+      deleteQuest,
+      openDialogUpdateQuestions,
+      createQuest,
       unitHandleClick,
       levelHandleClick,
       updateQuestions,
+      updateQuest,
       hideDialog,
       openDialogAddUnit,
+      openDialogAddQuestions,
       openDialogUpdateUnit,
       openDialogAddLevel,
       openDialogUpdateLevel,
@@ -348,11 +499,54 @@ export default {
       deleteLevel,
     };
   },
-  methods: {},
+  watch: {
+    questionsType: function (val) {
+      if (val) {
+        this.$refs.modal2.open({});
+      }
+    },
+  },
+  methods: {
+    fetchChanges(data) {
+      this.questionsType = data.type;
+      console.log(this.questionsType);
+    },
+    addQuestionTypeFunc() {
+      this.$refs.modal.open({});
+    },
+  },
 };
 </script>
 
 <style scoped>
+.nu-modal {
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 3px 6px rgb(0 0 0 / 16%), 0 3px 16px rgb(0 0 0 / 12%);
+  position: absolute;
+  top: 20%;
+  left: 50%;
+  width: 80%;
+  margin-bottom: 50px;
+  max-width: 1600px;
+  border-radius: 2px;
+  z-index: 1;
+  opacity: 0;
+}
+nu-modal {
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 3px 6px rgb(0 0 0 / 16%), 0 3px 16px rgb(0 0 0 / 12%);
+  position: absolute;
+  top: 20%;
+  left: 50%;
+  width: 80%;
+  margin-bottom: 50px;
+  max-width: 1600px;
+  border-radius: 2px;
+  z-index: 1;
+  opacity: 0;
+}
 .active-li {
   border: 1px solid #eda81c;
   box-sizing: border-box;
@@ -390,6 +584,7 @@ export default {
   box-sizing: border-box !important;
   opacity: 1 !important;
   background: white !important;
+  cursor: url("/assets/hand-paper.png") !important;
   color: black;
   z-index: 999 !important;
 }
@@ -403,5 +598,6 @@ export default {
 }
 
 .list-group-item {
+  cursor: url("../../assets/hand-paper.png"), auto;
 }
 </style>
